@@ -23,6 +23,7 @@ CURRENT_KUBERNETES_VERSIONS=()
 CURRENT_KUBERNETES_MODES=()
 CURRENT_POSTGRES_VERSIONS=()
 CURRENT_MYSQL_VERSIONS=()
+CURRENT_MSSQL_VERSIONS=()
 CURRENT_KIND_VERSIONS=()
 CURRENT_HELM_VERSIONS=()
 CURRENT_EXECUTOR=()
@@ -40,12 +41,24 @@ function initialization::create_directories() {
     # As well as hashes of the important files, but also we generate build scripts there that are
     # Used to execute the commands for breeze
     export BUILD_CACHE_DIR="${AIRFLOW_SOURCES}/.build"
-    export BUILD_CACHE_DIR
     readonly BUILD_CACHE_DIR
+
+    # In case of tmpfs backend for docker, mssql fails because TMPFS does not support
+    # O_DIRECT parameter for direct writing to the filesystem
+    # https://github.com/microsoft/mssql-docker/issues/13
+    # so we need to mount an external volume for its db location
+    # the external db must allow for parallel testing so external volume is mapped
+    # to the data volume
+    export MSSQL_DATA_VOLUME="${BUILD_CACHE_DIR}/tmp_mssql_volume"
 
     # Create those folders above in case they do not exist
     mkdir -p "${BUILD_CACHE_DIR}" >/dev/null
     mkdir -p "${FILES_DIR}" >/dev/null
+    mkdir -p "${MSSQL_DATA_VOLUME}" >/dev/null
+    # MSSQL 2019 runs with non-root user by default so we have to make the volumes world-writeable
+    # This is a bit scary and we could get by making it group-writeable but the group would have
+    # to be set to "root" (GID=0) for the volume to work and this cannot be accomplished without sudo
+    chmod a+rwx "${MSSQL_DATA_VOLUME}"
 
     # By default we are not in CI environment GitHub Actions sets CI to "true"
     export CI="${CI="false"}"
@@ -74,6 +87,7 @@ function initialization::initialize_base_variables() {
     export WEBSERVER_HOST_PORT=${WEBSERVER_HOST_PORT:="28080"}
     export POSTGRES_HOST_PORT=${POSTGRES_HOST_PORT:="25433"}
     export MYSQL_HOST_PORT=${MYSQL_HOST_PORT:="23306"}
+    export MSSQL_HOST_PORT=${MSSQL_HOST_PORT:="21433"}
     export FLOWER_HOST_PORT=${FLOWER_HOST_PORT:="25555"}
     export REDIS_HOST_PORT=${REDIS_HOST_PORT:="26379"}
 
@@ -103,6 +117,10 @@ function initialization::initialize_base_variables() {
     CURRENT_MYSQL_VERSIONS+=("5.7" "8")
     export CURRENT_MYSQL_VERSIONS
 
+    # Currently supported versions of MSSQL
+    CURRENT_MSSQL_VERSIONS+=("2017-latest" "2019-latest")
+    export CURRENT_MSSQL_VERSIONS
+
     BACKEND=${BACKEND:="sqlite"}
     export BACKEND
 
@@ -111,6 +129,9 @@ function initialization::initialize_base_variables() {
 
     # Default MySQL versions
     export MYSQL_VERSION=${MYSQL_VERSION:=${CURRENT_MYSQL_VERSIONS[0]}}
+
+    #Default MS SQL version
+    export MSSQL_VERSION=${MSSQL_VERSION:=${CURRENT_MSSQL_VERSIONS[0]}}
 
     # If set to true, the database will be reset at entry. Works for Postgres and MySQL
     export DB_RESET=${DB_RESET:="false"}
@@ -175,7 +196,7 @@ function initialization::initialize_dockerhub_variables() {
 
     # You can override DOCKERHUB_REPO to use your own DockerHub repository and play with your
     # own docker images. In this case you can build images locally and push them
-    export DOCKERHUB_REPO=${DOCKERHUB_REPO:="airflow"}
+    export DOCKERHUB_REPO=${DOCKERHUB_REPO:="airflow-ci"}
 }
 
 # Determine available integrations
@@ -897,6 +918,7 @@ function initialization::make_constants_read_only() {
     readonly CURRENT_KUBERNETES_MODES
     readonly CURRENT_POSTGRES_VERSIONS
     readonly CURRENT_MYSQL_VERSIONS
+    readonly CURRENT_MSSQL_VERSIONS
     readonly CURRENT_KIND_VERSIONS
     readonly CURRENT_HELM_VERSIONS
     readonly CURRENT_EXECUTOR
